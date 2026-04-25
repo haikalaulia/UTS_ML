@@ -1,92 +1,76 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-import numpy as np
-import joblib
-import os
+import logging
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pathlib import Path
 
-app = FastAPI()
+from .services import ModelService
+from .schemas import PredictionRequest
 
-# =========================
-# Config Path
-# =========================
-MODEL_PATH = 
-# Jika menggunakan pipeline (sudah include preprocessing)
-#PREPROCESSOR_PATH = 
+# Konfigurasi logging untuk mencatat aktivitas aplikasi (info, error, dll)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+)
 
-model = None
-preprocessor = None
-use_pipeline = False
+logger = logging.getLogger(__name__)
 
-# =========================
-# Load Model
-# =========================
-try:
-    if os.path.exists(MODEL_PATH):
-        model = 
+# Menentukan path root project dan lokasi file model machine learning
+BASE_DIR = Path(__file__).resolve().parents[2]
+MODEL_PATH = BASE_DIR / "model" / "random_forest_tuned_pipeline.pkl"
 
-        # Cek apakah ini pipeline (punya step transform)
-        if hasattr(model, "predict") and hasattr(model, "transform") is False:
-            use_pipeline = True
+# Inisialisasi service yang bertanggung jawab untuk loading model dan prediksi
+model_service = ModelService(MODEL_PATH)
 
-    if os.path.exists(PREPROCESSOR_PATH):
-        preprocessor = 
+# Inisialisasi aplikasi FastAPI beserta metadata (judul, versi, deskripsi)
+app = FastAPI(
+    title="Agro ML API",
+    version="1.0.0",
+    description="API untuk prediksi kegagalan tanaman"
+)
 
-except Exception as e:
-    print("Error loading model:", e)
+# Konfigurasi CORS agar frontend (misalnya Streamlit) dapat mengakses API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # production: ganti domain spesifik
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-
-# =========================
-# Request Schema
-# =========================
-class InputData(BaseModel):
-    # Sesuaikan pada saat training kolom apa saja yang digunakan
-    bulk_density: float
-    organic_matter: float
-    cation_exchange_capacity: float
-    salinity: float
-    
-
-
-# =========================
-# Root Endpoint
-# =========================
-@app.get("/")
-def read_root():
-    return {"message": "Agro ML API is running"}
-
-
-# =========================
-# Prediction Endpoint
-# =========================
-@app.post("/predict")
-def predict(data: InputData):
-
-    if model is None:
-        return {"error": "Model not loaded"}
-
+# Event startup untuk memuat model saat aplikasi pertama kali dijalankan
+@app.on_event("startup")
+def startup_event():
+    logger.info("🚀 Starting application...")
     try:
-        # Convert ke numpy array
-        input_array = np.array([[
-            
-        ]])
+        model_service.load_model()
+    except Exception as e:
+        logger.error(f"Startup failed: {e}")
 
-        # =========================
-        # MODE 1: Pipeline
-        # =========================
-        if use_pipeline:
-            prediction = 
-
-        # =========================
-        # MODE 2: Manual preprocessing
-        # =========================
-        else:
-    
-            prediction = 
-
+# Endpoint untuk mengecek status backend dan kesiapan model
+@app.get("/health")
+def health_check():
+    if model_service.is_ready():
+        return {"status": "ok", "model_loaded": True}
+    else:
         return {
-            "prediction": int(prediction),
-            "interpretation": "Suitable" if prediction == 1 else "Not Suitable"
+            "status": "degraded",
+            "model_loaded": False,
+            "error": "Model not loaded"
         }
 
+# Endpoint utama untuk menerima input data dan mengembalikan hasil prediksi dari model
+@app.post("/predict")
+def predict(request: PredictionRequest):
+    if not model_service.is_ready():
+        raise HTTPException(status_code=503, detail="Model not ready")
+
+    try:
+        result = model_service.predict(request.dict())
+        return result
+
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
     except Exception as e:
-        return {"error": str(e)}
+        logger.exception("Unexpected error")
+        raise HTTPException(status_code=500, detail="Internal Server Error")

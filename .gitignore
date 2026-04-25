@@ -1,5 +1,6 @@
 # Data besar
 dataset/*.csv
+model/*.pkl
 *.pyc
 __pycache__/
 .ipynb_checkpoints/

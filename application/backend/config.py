@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 # Menentukan path dasar direktori file saat ini dan root project
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent[2]
 PROJECT_ROOT = BASE_DIR.parent
 
 # Menentukan path default model machine learning (file .pkl)
